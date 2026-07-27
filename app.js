@@ -9,7 +9,9 @@ const BUILTIN_CATEGORIES = [
 ];
 const UNCATEGORIZED = "Uncategorized";
 
-let transactions = assignKeys(load("cc.transactions", []));
+// Initialised below, once BANK_PARSERS exists — deriving the types needs it.
+let bank;
+let transactions;
 let assignments = load("cc.assignments", {});   // type -> category
 
 // Only the user's own categories are stored. The built-in ones come from the
@@ -50,24 +52,28 @@ function save(key, value) {
 /* ---------- CSV parsing ---------- */
 
 // Each bank gets its own parser: `matches` inspects the header row, `parse`
-// turns a bank-specific row into the generic {date, type, description, amount}.
+// turns a bank-specific row into the generic {date, id, description, amount},
+// and `inferType` reduces a description to the type it is grouped under.
 const BANK_PARSERS = [
   {
     name: "Swedbank",
     matches: (header) => header.includes("Bokföringsdatum") && header.includes("Belopp"),
     parse: (row, header) => {
       const col = (name) => row[header.indexOf(name)];
-      const description = (col("Text") || "").trim();
       return {
         date: (col("Bokföringsdatum") || "").trim(),
         id: (col("Verifikationsnummer") || "").trim(),
-        type: inferTypeSwedbank(description),
-        description,
+        description: (col("Text") || "").trim(),
         amount: parseAmount(col("Belopp")),
       };
     },
+    inferType: inferTypeSwedbank,
   },
 ];
+
+function parserNamed(name) {
+  return BANK_PARSERS.find((p) => p.name === name) || BANK_PARSERS[0];
+}
 
 // "MAXI ICA STO/26-07-13" -> "MAXI ICA STO", but "APPLE COM/BI" keeps its slash
 // because it is not followed by a date.
@@ -102,16 +108,27 @@ function parseCsv(text) {
   const parser = BANK_PARSERS.find((p) => p.matches(header));
   if (!parser) throw new Error("Unrecognized CSV format: " + header.join(";"));
 
-  return assignKeys(lines.slice(1)
+  const rows = lines.slice(1)
     .map((line) => parser.parse(splitCsvLine(line), header))
-    .filter((t) => t.date));
+    .filter((t) => t.date);
+  return { bank: parser.name, rows: assignDerived(rows, parser.name) };
+}
+
+// `type` and `key` are both worked out from what the CSV said, so they are
+// derived on every load rather than stored: changing how a type is inferred
+// then takes effect on a reload, without the statement having to be imported
+// again.
+function assignDerived(list, bank) {
+  const inferType = parserNamed(bank).inferType;
+  for (const t of list) t.type = inferType(t.description);
+  return assignKeys(list);
 }
 
 // Verifikationsnummer is not unique — in a real statement one value covered 671
 // rows, and even whole CSV lines can repeat — so per-transaction exclusions are
 // keyed on the whole row plus a counter for the rows that are still identical.
-// Derived rather than stored, so it stays out of localStorage; it has to be
-// built from the full list, since a filtered list would renumber the duplicates.
+// It has to be built from the full list, since a filtered list would renumber
+// the duplicates.
 function assignKeys(list) {
   const seen = new Map();
   for (const t of list) {
@@ -122,6 +139,9 @@ function assignKeys(list) {
   }
   return list;
 }
+
+bank = load("cc.bank", BANK_PARSERS[0].name);
+transactions = assignDerived(load("cc.transactions", []), bank);
 
 /* ---------- loading ---------- */
 
@@ -163,9 +183,13 @@ document.getElementById("file-input").onchange = (e) => {
   const reader = new FileReader();
   reader.onload = () => {
     try {
-      transactions = parseCsv(reader.result);
-      // `key` is derived on load, so it is stripped rather than persisted.
-      save("cc.transactions", transactions.map(({ key, ...rest }) => rest));
+      const parsed = parseCsv(reader.result);
+      transactions = parsed.rows;
+      bank = parsed.bank;
+      save("cc.bank", bank);
+      // `type` and `key` are derived on load, so they are stripped rather than
+      // persisted — only what the CSV actually said is kept.
+      save("cc.transactions", transactions.map(({ type, key, ...rest }) => rest));
       setStatus(`${transactions.length} transactions from ${file.name}`);
       renderAll();
     } catch (err) {

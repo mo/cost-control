@@ -4,7 +4,8 @@
 // between own accounts are kept from swamping the actual costs.
 const EXCLUDED = "Excluded";
 const DEFAULT_CATEGORIES = [
-  "Rent", "Food", "Food (takeout)", "Clothes", "Car (gas)", "Car (repair)", EXCLUDED,
+  "Rent", "Food", "Food (takeout)", "Clothes", "Car (gas)", "Car (repair)",
+  "Entertainment", "Utilities", "Medicine", EXCLUDED,
 ];
 const UNCATEGORIZED = "Uncategorized";
 
@@ -470,6 +471,7 @@ const SERIES_COLORS = [
   "#008300",  // green
   "#4a3aa7",  // violet
   "#e34948",  // red
+  "#7a5cc4",  // light violet
 ];
 const OVERFLOW_COLOR = "#8a8983";   // past the palette; see categoryColor
 const UNCATEGORIZED_COLOR = "#b8b7b2";

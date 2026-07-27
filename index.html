@@ -29,6 +29,19 @@
   tbody tr:hover { background: rgb(239, 245, 248); }
   .negative { color: #b00; }
 
+  /* The category picker reads as a chip: the swatch is set inline per row. */
+  #types-table select {
+    border: 1px solid rgba(0, 0, 0, 0.18);
+    border-radius: 6px;
+    padding: 2px 4px;
+    min-width: 9em;
+    font-weight: 500;
+    cursor: pointer;
+    transition: box-shadow 0.12s ease;
+  }
+  #types-table select:hover { box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25); }
+  #types-table select:focus-visible { outline: 2px solid #2a78d6; outline-offset: 1px; }
+
   #status { color: #555; margin-left: 1em; }
   .hint { color: #555; }
   fieldset { display: inline-block; margin: 0 0 1em 0; }

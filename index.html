@@ -55,6 +55,7 @@
         <th class="sortable" data-sort="type">Type</th>
         <th class="sortable" data-sort="description">Description</th>
         <th class="sortable amount" data-sort="amount">Amount</th>
+        <th class="sortable" data-sort="excluded">Excluded category?</th>
       </tr>
     </thead>
     <tbody></tbody>
@@ -66,6 +67,8 @@
     <input id="new-category" placeholder="New category name" size="20">
     <button id="add-category">Add category</button>
   </p>
+  <p class="hint">Types put in "Excluded" are left out of the chart &mdash; use it for
+     transfers between your own accounts.</p>
   <p id="cat-empty" class="hint">No transactions loaded, so there are no types to categorize yet.</p>
   <table id="types-table" hidden>
     <thead>

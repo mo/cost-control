@@ -1,11 +1,17 @@
 "use strict";
 
-const DEFAULT_CATEGORIES = ["Rent", "Food", "Clothes", "Car"];
+// Types put in EXCLUDED are left out of the chart, which is how transfers
+// between own accounts are kept from swamping the actual costs.
+const EXCLUDED = "Excluded";
+const DEFAULT_CATEGORIES = ["Rent", "Food", "Clothes", "Car", EXCLUDED];
 const UNCATEGORIZED = "Uncategorized";
 
 let transactions = load("cc.transactions", []);
 let categories = load("cc.categories", DEFAULT_CATEGORIES);
 let assignments = load("cc.assignments", {});   // type -> category
+
+// Kept last so it stays out of the way of the categories worth reading.
+if (!categories.includes(EXCLUDED)) categories.push(EXCLUDED);
 
 function load(key, fallback) {
   try {
@@ -194,7 +200,11 @@ function showPage(page, push) {
     url.searchParams.set("page", page);
     history.pushState({}, "", url);
   }
-  if (page === "chart") renderChart();   // canvas needs to be visible to size itself
+  // Both tabs are rendered on show: the canvas needs to be visible to size
+  // itself, and the data tab's "Excluded category?" column goes stale as soon
+  // as an assignment changes on the categories tab.
+  if (page === "chart") renderChart();
+  if (page === "data") renderData();
 }
 
 for (const btn of document.querySelectorAll("#tabs button")) {
@@ -263,7 +273,11 @@ function renderData() {
   markSortIndicators(table, dataSort);
   const tbody = table.querySelector("tbody");
   tbody.innerHTML = "";
-  for (const t of sortRows(rows, dataSort)) {
+  // `excluded` is derived from the category the type sits in, so it is attached
+  // here rather than stored on the transaction.
+  const decorated = rows.map((t) =>
+    ({ ...t, excluded: assignments[t.type] === EXCLUDED ? EXCLUDED : "" }));
+  for (const t of sortRows(decorated, dataSort)) {
     const tr = tbody.insertRow();
     tr.insertCell().textContent = t.date;
     tr.insertCell().textContent = t.type;
@@ -271,6 +285,7 @@ function renderData() {
     const amount = tr.insertCell();
     amount.textContent = kronor(t.amount);
     amount.className = "amount" + (t.amount < 0 ? " negative" : "");
+    tr.insertCell().textContent = t.excluded;
   }
 }
 
@@ -381,22 +396,15 @@ function renderChart() {
   const empty = document.getElementById("chart-empty");
   const canvas = document.getElementById("chart");
   const rows = visible();
-  empty.hidden = rows.length > 0;
-  canvas.hidden = rows.length === 0;
-  if (!rows.length) {
-    setEmptyMessage(empty);
-    if (chart) { chart.destroy(); chart = null; }
-    return;
-  }
-
   const groupBy = selectedGroupBy();
   const totals = new Map();       // bucket -> category -> cost
   const usedCategories = new Set();
 
   for (const t of rows) {
     if (t.amount >= 0) continue;  // costs only
-    const bucket = bucketOf(t.date, groupBy);
     const category = assignments[t.type] || UNCATEGORIZED;
+    if (category === EXCLUDED) continue;
+    const bucket = bucketOf(t.date, groupBy);
     if (!totals.has(bucket)) totals.set(bucket, new Map());
     const row = totals.get(bucket);
     row.set(category, (row.get(category) || 0) + -t.amount);
@@ -404,6 +412,18 @@ function renderChart() {
   }
 
   const labels = [...totals.keys()].sort();
+
+  // Nothing chartable: no data at all, none in range, or everything left is
+  // income or excluded.
+  empty.hidden = labels.length > 0;
+  canvas.hidden = labels.length === 0;
+  if (!labels.length) {
+    if (rows.length) empty.textContent = "No costs to chart in the selected period.";
+    else setEmptyMessage(empty);
+    if (chart) { chart.destroy(); chart = null; }
+    return;
+  }
+
   const stackOrder = categories.filter((c) => usedCategories.has(c));
   if (usedCategories.has(UNCATEGORIZED)) stackOrder.push(UNCATEGORIZED);
 

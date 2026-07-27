@@ -458,6 +458,49 @@ function selectedGroupBy() {
   return document.querySelector('input[name="groupby"]:checked').value;
 }
 
+const BUCKET_NOUN = { year: "year", quarter: "quarter", month: "month", week: "week" };
+
+// Per-category totals under the chart, with the average over the buckets the
+// chart is actually showing — so it tracks both the group-by and the date range.
+function renderChartSummary(stackOrder, totals, labels, groupBy) {
+  const table = document.getElementById("chart-summary");
+  table.hidden = false;
+  document.getElementById("summary-average").textContent =
+    `Average cost per ${BUCKET_NOUN[groupBy]}`;
+
+  const tbody = table.querySelector("tbody");
+  tbody.innerHTML = "";
+  let grandTotal = 0;
+
+  for (const category of stackOrder) {
+    const total = labels.reduce((sum, b) => sum + (totals.get(b).get(category) || 0), 0);
+    grandTotal += total;
+
+    const tr = tbody.insertRow();
+    const name = tr.insertCell();
+    const swatch = document.createElement("span");
+    swatch.className = "swatch";
+    swatch.style.background = categoryColor(category);
+    name.append(swatch, category);
+    addAmount(tr, total);
+    addAmount(tr, total / labels.length);
+  }
+
+  const foot = table.querySelector("tfoot") || table.createTFoot();
+  foot.innerHTML = "";
+  const tr = foot.insertRow();
+  tr.insertCell().textContent = `Total over ${labels.length} ${BUCKET_NOUN[groupBy]}s`;
+  addAmount(tr, grandTotal);
+  addAmount(tr, grandTotal / labels.length);
+}
+
+function addAmount(tr, value) {
+  const cell = tr.insertCell();
+  cell.textContent = kronor(value);
+  cell.title = kronorExact(value);
+  cell.className = "amount";
+}
+
 // A fixed, validated categorical palette rather than generated hues: the order
 // is what keeps neighbouring stack layers apart for colourblind readers, so
 // slots are handed out in order and never cycled. Colour follows the category
@@ -527,6 +570,7 @@ function renderChart() {
     if (rows.length) empty.textContent = "No costs to chart in the selected period.";
     else setEmptyMessage(empty);
     if (chart) { chart.destroy(); chart = null; }
+    document.getElementById("chart-summary").hidden = true;
     return;
   }
 
@@ -545,6 +589,8 @@ function renderChart() {
     borderWidth: { top: 2 },
     borderSkipped: false,
   }));
+
+  renderChartSummary(stackOrder, totals, labels, groupBy);
 
   if (chart) chart.destroy();
   chart = new Chart(canvas, {

@@ -42,6 +42,11 @@
   #types-table select:hover { box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25); }
   #types-table select:focus-visible { outline: 2px solid #2a78d6; outline-offset: 1px; }
 
+  #chart-summary { margin-top: 1em; }
+  #chart-summary tfoot td { font-weight: bold; }
+  .swatch { display: inline-block; width: 0.75em; height: 0.75em;
+            border-radius: 2px; margin-right: 0.5em; }
+
   #status { color: #555; margin-left: 1em; }
   .hint { color: #555; }
   fieldset { display: inline-block; margin: 0 0 1em 0; }
@@ -111,6 +116,16 @@
   </fieldset>
   <p id="chart-empty" class="hint">No transactions loaded.</p>
   <div style="height: 70vh;"><canvas id="chart"></canvas></div>
+  <table id="chart-summary" hidden>
+    <thead>
+      <tr>
+        <th>Category</th>
+        <th class="amount">Total</th>
+        <th class="amount" id="summary-average">Average</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
 </div>
 
 <script src="https://unpkg.com/chart.js@4.4.1/dist/chart.umd.js"></script>

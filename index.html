@@ -25,6 +25,8 @@
   th { background: #eee; }
   th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
   td.amount, th.amount { text-align: right; font-variant-numeric: tabular-nums; }
+  td.date { white-space: nowrap; }
+  tbody tr:hover { background: rgb(239, 245, 248); }
   .negative { color: #b00; }
 
   #status { color: #555; margin-left: 1em; }
@@ -55,7 +57,10 @@
         <th class="sortable" data-sort="type">Type</th>
         <th class="sortable" data-sort="description">Description</th>
         <th class="sortable amount" data-sort="amount">Amount</th>
-        <th class="sortable" data-sort="excluded">Excluded category?</th>
+        <th class="sortable" data-sort="excluded"
+            title="The type belongs to the Excluded category">Excl cat</th>
+        <th class="sortable" data-sort="manual"
+            title="Exclude this single transaction from the chart">Excl tx</th>
       </tr>
     </thead>
     <tbody></tbody>

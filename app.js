@@ -6,9 +6,15 @@ const EXCLUDED = "Excluded";
 const DEFAULT_CATEGORIES = ["Rent", "Food", "Clothes", "Car", EXCLUDED];
 const UNCATEGORIZED = "Uncategorized";
 
-let transactions = load("cc.transactions", []);
+let transactions = assignKeys(load("cc.transactions", []));
 let categories = load("cc.categories", DEFAULT_CATEGORIES);
 let assignments = load("cc.assignments", {});   // type -> category
+
+// Individually excluded transactions, by row key. Deliberately kept when the
+// transactions themselves are dropped, so reloading a statement does not lose
+// the exclusions that were picked out by hand.
+let excludedTx = new Set(load("cc.excludedTx", []));
+const saveExcludedTx = () => save("cc.excludedTx", [...excludedTx]);
 
 // Appended rather than inserted so existing categories keep their chart colour;
 // the dropdown lists it first regardless.
@@ -40,6 +46,7 @@ const BANK_PARSERS = [
       const description = (col("Text") || "").trim();
       return {
         date: (col("Bokföringsdatum") || "").trim(),
+        id: (col("Verifikationsnummer") || "").trim(),
         type: inferTypeSwedbank(description),
         description,
         amount: parseAmount(col("Belopp")),
@@ -73,9 +80,25 @@ function parseCsv(text) {
   const parser = BANK_PARSERS.find((p) => p.matches(header));
   if (!parser) throw new Error("Unrecognized CSV format: " + header.join(";"));
 
-  return lines.slice(1)
+  return assignKeys(lines.slice(1)
     .map((line) => parser.parse(splitCsvLine(line), header))
-    .filter((t) => t.date);
+    .filter((t) => t.date));
+}
+
+// Verifikationsnummer is not unique — in a real statement one value covered 671
+// rows, and even whole CSV lines can repeat — so per-transaction exclusions are
+// keyed on the whole row plus a counter for the rows that are still identical.
+// Derived rather than stored, so it stays out of localStorage; it has to be
+// built from the full list, since a filtered list would renumber the duplicates.
+function assignKeys(list) {
+  const seen = new Map();
+  for (const t of list) {
+    const base = `${t.date}|${t.id}|${t.description}|${t.amount}`;
+    const n = seen.get(base) || 0;
+    seen.set(base, n + 1);
+    t.key = n === 0 ? base : `${base}#${n}`;
+  }
+  return list;
 }
 
 /* ---------- loading ---------- */
@@ -101,8 +124,9 @@ function renderStatus() {
 document.getElementById("load-btn").onclick = () =>
   document.getElementById("file-input").click();
 
-// Only drops the transactions; categories and their assignments are kept so a
-// freshly loaded statement lands in the categories already set up.
+// Only drops the transactions; categories, their assignments and the
+// per-transaction exclusions are kept so a freshly loaded statement lands in
+// the setup that is already there.
 dropBtn.onclick = () => {
   if (!confirm("Drop the loaded transactions from localstorage?")) return;
   transactions = [];
@@ -118,7 +142,8 @@ document.getElementById("file-input").onchange = (e) => {
   reader.onload = () => {
     try {
       transactions = parseCsv(reader.result);
-      save("cc.transactions", transactions);
+      // `key` is derived on load, so it is stripped rather than persisted.
+      save("cc.transactions", transactions.map(({ key, ...rest }) => rest));
       setStatus(`${transactions.length} transactions from ${file.name}`);
       renderAll();
     } catch (err) {
@@ -280,11 +305,16 @@ function renderData() {
   tbody.innerHTML = "";
   // `excluded` is derived from the category the type sits in, so it is attached
   // here rather than stored on the transaction.
-  const decorated = rows.map((t) =>
-    ({ ...t, excluded: assignments[t.type] === EXCLUDED ? EXCLUDED : "" }));
+  const decorated = rows.map((t) => ({
+    ...t,
+    excluded: assignments[t.type] === EXCLUDED ? EXCLUDED : "",
+    manual: excludedTx.has(t.key) ? EXCLUDED : "",
+  }));
   for (const t of sortRows(decorated, dataSort)) {
     const tr = tbody.insertRow();
-    tr.insertCell().textContent = t.date;
+    const date = tr.insertCell();
+    date.textContent = t.date;
+    date.className = "date";
     tr.insertCell().textContent = t.type;
     tr.insertCell().textContent = t.description;
     const amount = tr.insertCell();
@@ -292,6 +322,16 @@ function renderData() {
     amount.title = kronorExact(t.amount);
     amount.className = "amount" + (t.amount < 0 ? " negative" : "");
     tr.insertCell().textContent = t.excluded;
+
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.checked = excludedTx.has(t.key);
+    box.onchange = () => {
+      if (box.checked) excludedTx.add(t.key);
+      else excludedTx.delete(t.key);
+      saveExcludedTx();
+    };
+    tr.insertCell().appendChild(box);
   }
 }
 
@@ -345,16 +385,28 @@ function renderCategories() {
     // Excluded sits right after the blank option: it is the one picked most
     // often when working down the list of uncategorized types.
     const select = document.createElement("select");
-    select.add(new Option("—", ""));
-    select.add(new Option(EXCLUDED, EXCLUDED));
+    const addOption = (label, value) => {
+      const option = new Option(label, value);
+      if (value) option.style.background = categoryColor(value);
+      select.add(option);
+    };
+    addOption("—", "");
+    addOption(EXCLUDED, EXCLUDED);
     for (const cat of categories) {
-      if (cat !== EXCLUDED) select.add(new Option(cat, cat));
+      if (cat !== EXCLUDED) addOption(cat, cat);
     }
     select.value = assignments[row.type] || "";
+    // The closed picker carries the colour of whatever is selected, so the
+    // column can be read as a block without opening anything.
+    const paint = () => {
+      select.style.background = select.value ? categoryColor(select.value) : "";
+    };
+    paint();
     select.onchange = () => {
       if (select.value) assignments[row.type] = select.value;
       else delete assignments[row.type];
       save("cc.assignments", assignments);
+      paint();
     };
     tr.insertCell().appendChild(select);
   }
@@ -404,6 +456,15 @@ function selectedGroupBy() {
 // Distinct hues, so neighbouring stack layers stay tellable apart.
 const color = (i) => `hsl(${(i * 137.5) % 360}, 65%, 55%)`;
 
+// Single source of truth for category colours, shared by the chart and the
+// category pickers. The two that never carry a hue are the ones that are not
+// really categories: one is not charted, the other is the absence of a choice.
+function categoryColor(category) {
+  if (category === EXCLUDED) return "#ddd";
+  if (category === UNCATEGORIZED) return "#bbb";
+  return color(categories.indexOf(category));
+}
+
 function renderChart() {
   const empty = document.getElementById("chart-empty");
   const canvas = document.getElementById("chart");
@@ -414,6 +475,7 @@ function renderChart() {
 
   for (const t of rows) {
     if (t.amount >= 0) continue;  // costs only
+    if (excludedTx.has(t.key)) continue;
     const category = assignments[t.type] || UNCATEGORIZED;
     if (category === EXCLUDED) continue;
     const bucket = bucketOf(t.date, groupBy);
@@ -444,7 +506,7 @@ function renderChart() {
   const datasets = stackOrder.map((category) => ({
     label: category,
     data: labels.map((b) => totals.get(b).get(category) || 0),
-    backgroundColor: category === UNCATEGORIZED ? "#bbb" : color(categories.indexOf(category)),
+    backgroundColor: categoryColor(category),
   }));
 
   if (chart) chart.destroy();

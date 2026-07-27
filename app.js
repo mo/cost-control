@@ -76,9 +76,19 @@ function parseCsv(text) {
 const statusEl = document.getElementById("status");
 const dropBtn = document.getElementById("drop-btn");
 
+let statusBase = "";
+
 function setStatus(text) {
-  statusEl.textContent = text;
+  statusBase = text;
+  renderStatus();
+}
+
+function renderStatus() {
+  const shown = visible().length;
+  const filtered = rangeId !== "all" && transactions.length > 0;
+  statusEl.textContent = filtered ? `${statusBase} (${shown} in range)` : statusBase;
   dropBtn.hidden = transactions.length === 0;
+  rangeEl.hidden = transactions.length === 0;
 }
 
 document.getElementById("load-btn").onclick = () =>
@@ -111,6 +121,57 @@ document.getElementById("file-input").onchange = (e) => {
   reader.readAsText(file, "utf-8");
   e.target.value = "";   // let the same file be picked again
 };
+
+/* ---------- date range filter ---------- */
+
+// Ranges are relative to today and expressed as an inclusive ISO start date, so
+// they can be compared against the transaction dates as plain strings.
+const RANGES = [
+  { id: "all", label: "All", start: () => null },
+  { id: "5y", label: "Last 5 years", start: () => backTo(5, 0) },
+  { id: "3y", label: "Last 3 years", start: () => backTo(3, 0) },
+  { id: "2y", label: "Last 2 years", start: () => backTo(2, 0) },
+  { id: "1y", label: "Last 1 year", start: () => backTo(1, 0) },
+  { id: "ytd", label: "Year to date", start: () => isoDate(new Date(new Date().getFullYear(), 0, 1)) },
+  { id: "3m", label: "Last 3 months", start: () => backTo(0, 3) },
+  { id: "6m", label: "Last 6 months", start: () => backTo(0, 6) },
+  { id: "1m", label: "Last month", start: () => backTo(0, 1) },
+];
+
+function isoDate(d) {
+  return d.getFullYear() + "-" +
+    String(d.getMonth() + 1).padStart(2, "0") + "-" +
+    String(d.getDate()).padStart(2, "0");
+}
+
+// Clamps the day so that going back from e.g. the 31st lands on the last day of
+// a shorter month rather than spilling into the next one.
+function backTo(years, months) {
+  const today = new Date();
+  const target = new Date(today.getFullYear() - years, today.getMonth() - months, 1);
+  const lastDay = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate();
+  target.setDate(Math.min(today.getDate(), lastDay));
+  return isoDate(target);
+}
+
+let rangeId = load("cc.range", "all");
+if (!RANGES.some((r) => r.id === rangeId)) rangeId = "all";
+
+const rangeEl = document.getElementById("range");
+for (const r of RANGES) rangeEl.add(new Option(r.label, r.id));
+rangeEl.value = rangeId;
+
+rangeEl.onchange = () => {
+  rangeId = rangeEl.value;
+  save("cc.range", rangeId);
+  renderAll();
+};
+
+// Every tab renders from this rather than from `transactions` directly.
+function visible() {
+  const start = RANGES.find((r) => r.id === rangeId).start();
+  return start === null ? transactions : transactions.filter((t) => t.date >= start);
+}
 
 /* ---------- tabs ---------- */
 
@@ -181,17 +242,28 @@ function markSortIndicators(table, sort) {
 
 const kronor = (n) => n.toLocaleString("sv-SE", { maximumFractionDigits: 2 });
 
+// An empty tab means either "nothing loaded" or "nothing in the chosen range".
+function setEmptyMessage(el, loadHint) {
+  el.textContent = transactions.length === 0
+    ? (loadHint || "No transactions loaded.")
+    : "No transactions in the selected period.";
+}
+
 function renderData() {
   const table = document.getElementById("data-table");
   const empty = document.getElementById("data-empty");
-  table.hidden = transactions.length === 0;
-  empty.hidden = transactions.length > 0;
-  if (!transactions.length) return;
+  const rows = visible();
+  table.hidden = rows.length === 0;
+  empty.hidden = rows.length > 0;
+  if (!rows.length) {
+    setEmptyMessage(empty, 'No transactions loaded. Click "Load transactions" to pick a .csv file.');
+    return;
+  }
 
   markSortIndicators(table, dataSort);
   const tbody = table.querySelector("tbody");
   tbody.innerHTML = "";
-  for (const t of sortRows(transactions, dataSort)) {
+  for (const t of sortRows(rows, dataSort)) {
     const tr = tbody.insertRow();
     tr.insertCell().textContent = t.date;
     tr.insertCell().textContent = t.type;
@@ -212,7 +284,7 @@ let typeSort = { key: "total", dir: "desc" };
 // it has cost in total (costs only, as a positive number).
 function typeSummary() {
   const byType = new Map();
-  for (const t of transactions) {
+  for (const t of visible()) {
     let entry = byType.get(t.type);
     if (!entry) {
       entry = { type: t.type, count: 0, total: 0 };
@@ -227,14 +299,18 @@ function typeSummary() {
 function renderCategories() {
   const table = document.getElementById("types-table");
   const empty = document.getElementById("cat-empty");
-  table.hidden = transactions.length === 0;
-  empty.hidden = transactions.length > 0;
-  if (!transactions.length) return;
+  const types = typeSummary();
+  table.hidden = types.length === 0;
+  empty.hidden = types.length > 0;
+  if (!types.length) {
+    setEmptyMessage(empty, "No transactions loaded, so there are no types to categorize yet.");
+    return;
+  }
 
   markSortIndicators(table, typeSort);
   const tbody = table.querySelector("tbody");
   tbody.innerHTML = "";
-  for (const row of sortRows(typeSummary(), typeSort)) {
+  for (const row of sortRows(types, typeSort)) {
     const tr = tbody.insertRow();
     tr.insertCell().textContent = row.type;
     const count = tr.insertCell();
@@ -304,9 +380,11 @@ const color = (i) => `hsl(${(i * 137.5) % 360}, 65%, 55%)`;
 function renderChart() {
   const empty = document.getElementById("chart-empty");
   const canvas = document.getElementById("chart");
-  empty.hidden = transactions.length > 0;
-  canvas.hidden = transactions.length === 0;
-  if (!transactions.length) {
+  const rows = visible();
+  empty.hidden = rows.length > 0;
+  canvas.hidden = rows.length === 0;
+  if (!rows.length) {
+    setEmptyMessage(empty);
     if (chart) { chart.destroy(); chart = null; }
     return;
   }
@@ -315,7 +393,7 @@ function renderChart() {
   const totals = new Map();       // bucket -> category -> cost
   const usedCategories = new Set();
 
-  for (const t of transactions) {
+  for (const t of rows) {
     if (t.amount >= 0) continue;  // costs only
     const bucket = bucketOf(t.date, groupBy);
     const category = assignments[t.type] || UNCATEGORIZED;
@@ -363,6 +441,7 @@ for (const radio of document.querySelectorAll('input[name="groupby"]')) {
 /* ---------- startup ---------- */
 
 function renderAll() {
+  renderStatus();
   renderData();
   renderCategories();
   if (currentPage() === "chart") renderChart();

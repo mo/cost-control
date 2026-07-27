@@ -5,8 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Cost Control</title>
 <style>
-  body { font-family: sans-serif; font-size: 14px; margin: 1em; }
-  button, select, input { font-size: 14px; }
+  /* Always render light, regardless of the OS/browser dark mode preference:
+     the colours below assume a light background. */
+  :root { color-scheme: light; }
+  body { font-family: sans-serif; font-size: 14px; margin: 1em;
+         background: #fff; color: #000; }
+  button, select, input { font-size: 14px; background: #fff; color: #000; }
 
   #tabs { margin: 1em 0 0.5em 0; border-bottom: 1px solid #999; }
   #tabs button { border: 1px solid #999; border-bottom: none; background: #eee;
@@ -34,6 +38,7 @@
 <input type="file" id="file-input" accept=".csv" hidden>
 <button id="drop-btn" hidden>Drop transactions from localstorage</button>
 <span id="status"></span>
+<select id="range" hidden></select>
 
 <div id="tabs">
   <button data-page="data">Data</button>

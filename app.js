@@ -223,12 +223,14 @@ function isoDate(d) {
 }
 
 // Clamps the day so that going back from e.g. the 31st lands on the last day of
-// a shorter month rather than spilling into the next one.
+// a shorter month rather than spilling into the next one. The day after that is
+// the inclusive start: "last 1 year" then covers a year up to and including
+// today, not a year and a day.
 function backTo(years, months) {
   const today = new Date();
   const target = new Date(today.getFullYear() - years, today.getMonth() - months, 1);
   const lastDay = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate();
-  target.setDate(Math.min(today.getDate(), lastDay));
+  target.setDate(Math.min(today.getDate(), lastDay) + 1);
   return isoDate(target);
 }
 
@@ -245,9 +247,14 @@ rangeEl.onchange = () => {
   renderAll();
 };
 
+// Null for "all"; otherwise the inclusive first date of the selected range.
+function rangeStart() {
+  return RANGES.find((r) => r.id === rangeId).start();
+}
+
 // Every tab renders from this rather than from `transactions` directly.
 function visible() {
-  const start = RANGES.find((r) => r.id === rangeId).start();
+  const start = rangeStart();
   return start === null ? transactions : transactions.filter((t) => t.date >= start);
 }
 
@@ -501,6 +508,39 @@ function bucketOf(dateStr, groupBy) {
   }
 }
 
+// First day of the bucket a date falls in.
+function bucketFloor(date, groupBy) {
+  switch (groupBy) {
+    case "year": return new Date(date.getFullYear(), 0, 1);
+    case "quarter": return new Date(date.getFullYear(), Math.floor(date.getMonth() / 3) * 3, 1);
+    case "month": return new Date(date.getFullYear(), date.getMonth(), 1);
+    case "week": {   // ISO weeks start on Monday, like `isoWeek` above
+      const monday = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+      monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+      return monday;
+    }
+  }
+}
+
+// The date ranges are counted back from today, so their start lands wherever it
+// lands inside a bucket. Charting straight from there leaves a stub bucket at
+// the left edge — "last 1 year" by quarter would draw five of them, the oldest
+// holding a few days — which also drags the per-bucket averages down. So the
+// chart starts at the first bucket the range covers in full, which is what
+// makes the bucket count come out as the range name implies.
+function chartStart(groupBy) {
+  const start = rangeStart();
+  if (start === null) return null;
+  const floor = bucketFloor(new Date(start), groupBy);
+  if (isoDate(floor) >= start) return isoDate(floor);
+  const next = new Date(floor);
+  if (groupBy === "week") next.setDate(next.getDate() + 7);
+  else next.setMonth(next.getMonth() + { year: 12, quarter: 3, month: 1 }[groupBy]);
+  // Unless skipping ahead would skip the range entirely — a short range grouped
+  // coarsely, say three months by year. One partial bucket beats no chart.
+  return isoDate(next) > isoDate(new Date()) ? start : isoDate(next);
+}
+
 function selectedGroupBy() {
   return document.querySelector('input[name="groupby"]:checked').value;
 }
@@ -607,8 +647,9 @@ function textOn(hex) {
 function renderChart() {
   const empty = document.getElementById("chart-empty");
   const canvas = document.getElementById("chart");
-  const rows = visible();
   const groupBy = selectedGroupBy();
+  const start = chartStart(groupBy);
+  const rows = start === null ? transactions : transactions.filter((t) => t.date >= start);
   const totals = new Map();       // bucket -> category -> cost
   const usedCategories = new Set();
 

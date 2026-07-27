@@ -157,10 +157,10 @@ function setStatus(text) {
 
 function renderStatus() {
   const shown = visible().length;
-  const filtered = rangeId !== "all" && transactions.length > 0;
+  const filtered = currentRange().id !== "all" && transactions.length > 0;
   statusEl.textContent = filtered ? `${statusBase} (${shown} in range)` : statusBase;
   dropBtn.hidden = transactions.length === 0;
-  rangeEl.hidden = transactions.length === 0;
+  syncRangeControls();
 }
 
 document.getElementById("load-btn").onclick = () =>
@@ -200,10 +200,41 @@ document.getElementById("file-input").onchange = (e) => {
   e.target.value = "";   // let the same file be picked again
 };
 
+/* ---------- URL state ---------- */
+
+// Which tab is open, the period shown and what the chart is doing with it all
+// live in the query string, so they survive a reload and the address bar
+// doubles as a link to that exact view. Only the tabs push a history entry:
+// stepping back through every legend click would bury the navigation worth
+// going back to.
+function urlParams() {
+  return new URLSearchParams(location.search);
+}
+
+// A key with an array value becomes one parameter per entry, which keeps
+// category names with a comma in them from needing a separator of their own.
+// A null value drops the parameter instead of writing it empty.
+function writeUrl(changes, push) {
+  const url = new URL(location);
+  for (const [key, value] of Object.entries(changes)) {
+    if (value === null) {
+      url.searchParams.delete(key);
+    } else if (Array.isArray(value)) {
+      url.searchParams.delete(key);
+      for (const one of value) url.searchParams.append(key, one);
+    } else {
+      url.searchParams.set(key, value);   // in place, so the order stays put
+    }
+  }
+  history[push ? "pushState" : "replaceState"]({}, "", url);
+}
+
 /* ---------- date range filter ---------- */
 
 // Ranges are relative to today and expressed as an inclusive ISO start date, so
-// they can be compared against the transaction dates as plain strings.
+// they can be compared against the transaction dates as plain strings. The
+// custom one is the exception: it carries both of its bounds, either of which
+// may be left open.
 const RANGES = [
   { id: "all", label: "All", start: () => null },
   { id: "5y", label: "Last 5 years", start: () => backTo(5, 0) },
@@ -214,7 +245,11 @@ const RANGES = [
   { id: "3m", label: "Last 3 months", start: () => backTo(0, 3) },
   { id: "6m", label: "Last 6 months", start: () => backTo(0, 6) },
   { id: "1m", label: "Last month", start: () => backTo(0, 1) },
+  { id: "custom", label: "Custom…", start: () => null },
 ];
+
+const CUSTOM = "custom";
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 function isoDate(d) {
   return d.getFullYear() + "-" +
@@ -234,55 +269,88 @@ function backTo(years, months) {
   return isoDate(target);
 }
 
-let rangeId = load("cc.range", "all");
-if (!RANGES.some((r) => r.id === rangeId)) rangeId = "all";
+// The period is in the URL, so a link decides what its recipient sees, and it
+// is saved as well, so a visit without one comes back to whatever was picked
+// last. Opening someone else's link does not overwrite that.
+let savedRange = load("cc.range", "all");
+if (!RANGES.some((r) => r.id === savedRange)) savedRange = "all";
+let savedCustom = load("cc.customRange", { from: null, to: null });
 
-const rangeEl = document.getElementById("range");
-for (const r of RANGES) rangeEl.add(new Option(r.label, r.id));
-rangeEl.value = rangeId;
+// Dates are compared as plain strings everywhere, so a well-formed but
+// impossible one — a hand-edited "2024-13-99" — would quietly act as a bound
+// that sorts somewhere. The parts are checked against a real date instead.
+function isoOrNull(value) {
+  if (!ISO_DATE.test(value || "")) return null;
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(year, month - 1, day);
+  return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day
+    ? value : null;
+}
 
-rangeEl.onchange = () => {
-  rangeId = rangeEl.value;
-  save("cc.range", rangeId);
-  renderAll();
-};
+// {id, from, to}, where from and to only mean anything for the custom range and
+// a null bound there is an open end.
+function currentRange() {
+  const params = urlParams();
+  const id = params.get("range");
+  if (id === CUSTOM) {
+    return { id, from: isoOrNull(params.get("from")), to: isoOrNull(params.get("to")) };
+  }
+  if (RANGES.some((r) => r.id === id)) return { id, from: null, to: null };
+  return savedRange === CUSTOM
+    ? { id: CUSTOM, from: isoOrNull(savedCustom.from), to: isoOrNull(savedCustom.to) }
+    : { id: savedRange, from: null, to: null };
+}
 
-// Null for "all"; otherwise the inclusive first date of the selected range.
-function rangeStart() {
-  return RANGES.find((r) => r.id === rangeId).start();
+// The two inclusive ISO bounds of the selected period; null is an open end.
+function rangeBounds() {
+  const range = currentRange();
+  if (range.id === CUSTOM) return { start: range.from, end: range.to };
+  return { start: RANGES.find((r) => r.id === range.id).start(), end: null };
 }
 
 // Every tab renders from this rather than from `transactions` directly.
 function visible() {
-  const start = rangeStart();
-  return start === null ? transactions : transactions.filter((t) => t.date >= start);
+  const { start, end } = rangeBounds();
+  if (start === null && end === null) return transactions;
+  return transactions.filter((t) =>
+    (start === null || t.date >= start) && (end === null || t.date <= end));
 }
 
-/* ---------- URL state ---------- */
+const rangeEl = document.getElementById("range");
+const customEl = document.getElementById("custom-range");
+const fromEl = document.getElementById("range-from");
+const toEl = document.getElementById("range-to");
+for (const r of RANGES) rangeEl.add(new Option(r.label, r.id));
 
-// Which tab is open and what the chart is showing live in the query string, so
-// they survive a reload and the address bar doubles as a link to that exact
-// view. Only the tabs push a history entry: stepping back through every legend
-// click would bury the navigation worth going back to. The date range is not
-// here — it filters every tab, so it is saved with the other settings instead.
-function urlParams() {
-  return new URLSearchParams(location.search);
+// The controls are a view of the URL, the same way the group-by radios are.
+function syncRangeControls() {
+  const range = currentRange();
+  rangeEl.value = range.id;
+  rangeEl.hidden = transactions.length === 0;
+  customEl.hidden = transactions.length === 0 || range.id !== CUSTOM;
+  fromEl.value = range.from || "";
+  toEl.value = range.to || "";
 }
 
-// A key with an array value becomes one parameter per entry, which keeps
-// category names with a comma in them from needing a separator of their own.
-function writeUrl(changes, push) {
-  const url = new URL(location);
-  for (const [key, value] of Object.entries(changes)) {
-    if (!Array.isArray(value)) {
-      url.searchParams.set(key, value);   // in place, so the order stays put
-      continue;
-    }
-    url.searchParams.delete(key);
-    for (const one of value) url.searchParams.append(key, one);
-  }
-  history[push ? "pushState" : "replaceState"]({}, "", url);
-}
+rangeEl.onchange = () => {
+  savedRange = rangeEl.value;
+  save("cc.range", savedRange);
+  // Picking "Custom…" comes back to the dates last used, if there are any.
+  writeUrl(savedRange === CUSTOM
+    ? { range: CUSTOM, from: isoOrNull(savedCustom.from), to: isoOrNull(savedCustom.to) }
+    : { range: savedRange, from: null, to: null });
+  syncRangeControls();
+  renderAll();
+};
+
+// A date input hands back either "" or a valid ISO date, so nothing else needs
+// checking here; typed nonsense simply never becomes a value.
+fromEl.onchange = toEl.onchange = () => {
+  savedCustom = { from: fromEl.value || null, to: toEl.value || null };
+  save("cc.customRange", savedCustom);
+  writeUrl({ range: CUSTOM, from: savedCustom.from, to: savedCustom.to });
+  renderAll();
+};
 
 /* ---------- tabs ---------- */
 
@@ -312,10 +380,12 @@ for (const btn of document.querySelectorAll("#tabs button")) {
   btn.onclick = () => showPage(btn.dataset.page, true);
 }
 
-// Going back or forward re-reads everything from the URL, chart controls
-// included, since the entry stepped onto may have been left on another tab.
+// Going back or forward re-reads everything from the URL — period and chart
+// controls included, since the entry stepped onto may have been left anywhere.
 window.onpopstate = () => {
   syncGroupByRadio();
+  renderStatus();
+  renderCategories();               // the one tab showPage does not render
   showPage(currentPage(), false);
 };
 
@@ -555,10 +625,12 @@ function bucketFloor(date, groupBy) {
 // the left edge — "last 1 year" by quarter would draw five of them, the oldest
 // holding a few days — which also drags the per-bucket averages down. So the
 // chart starts at the first bucket the range covers in full, which is what
-// makes the bucket count come out as the range name implies.
+// makes the bucket count come out as the range name implies. A custom period is
+// left alone: dates that were typed in are shown as typed, stub bucket and all.
 function chartStart(groupBy) {
-  const start = rangeStart();
-  if (start === null) return null;
+  const { id } = currentRange();
+  const start = rangeBounds().start;
+  if (start === null || id === CUSTOM) return start;
   const floor = bucketFloor(new Date(start), groupBy);
   if (isoDate(floor) >= start) return isoDate(floor);
   const next = new Date(floor);
@@ -693,7 +765,9 @@ function renderChart() {
   const canvas = document.getElementById("chart");
   const groupBy = selectedGroupBy();
   const start = chartStart(groupBy);
-  const rows = start === null ? transactions : transactions.filter((t) => t.date >= start);
+  const end = rangeBounds().end;
+  const rows = transactions.filter((t) =>
+    (start === null || t.date >= start) && (end === null || t.date <= end));
   const totals = new Map();       // bucket -> category -> cost
   const usedCategories = new Set();
 

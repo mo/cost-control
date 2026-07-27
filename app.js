@@ -3,7 +3,12 @@
 // Types put in EXCLUDED are left out of the chart, which is how transfers
 // between own accounts are kept from swamping the actual costs.
 const EXCLUDED = "Excluded";
-const DEFAULT_CATEGORIES = ["Rent", "Food", "Clothes", "Car", EXCLUDED];
+const DEFAULT_CATEGORIES = [
+  "Rent", "Food", "Food (takeout)", "Clothes", "Car (gas)", "Car (repair)", EXCLUDED,
+];
+
+// Categories that were renamed after people already had them stored.
+const RENAMED_CATEGORIES = { "Car": "Car (gas)" };
 const UNCATEGORIZED = "Uncategorized";
 
 let transactions = assignKeys(load("cc.transactions", []));
@@ -16,9 +21,22 @@ let assignments = load("cc.assignments", {});   // type -> category
 let excludedTx = new Set(load("cc.excludedTx", []));
 const saveExcludedTx = () => save("cc.excludedTx", [...excludedTx]);
 
-// Appended rather than inserted so existing categories keep their chart colour;
-// the dropdown lists it first regardless.
-if (!categories.includes(EXCLUDED)) categories.push(EXCLUDED);
+// Bring a stored setup up to date with the built-in list: apply renames, add
+// any built-in category that is missing, and keep EXCLUDED last so the others
+// hold on to their chart colours.
+(function migrateCategories() {
+  categories = categories.map((c) => RENAMED_CATEGORIES[c] || c);
+  for (const [type, cat] of Object.entries(assignments)) {
+    if (RENAMED_CATEGORIES[cat]) assignments[type] = RENAMED_CATEGORIES[cat];
+  }
+  for (const cat of DEFAULT_CATEGORIES) {
+    if (!categories.includes(cat)) categories.push(cat);
+  }
+  categories = [...new Set(categories)].filter((c) => c !== EXCLUDED);
+  categories.push(EXCLUDED);
+  save("cc.categories", categories);
+  save("cc.assignments", assignments);
+})();
 
 function load(key, fallback) {
   try {

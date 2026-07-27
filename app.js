@@ -6,9 +6,6 @@ const EXCLUDED = "Excluded";
 const DEFAULT_CATEGORIES = [
   "Rent", "Food", "Food (takeout)", "Clothes", "Car (gas)", "Car (repair)", EXCLUDED,
 ];
-
-// Categories that were renamed after people already had them stored.
-const RENAMED_CATEGORIES = { "Car": "Car (gas)" };
 const UNCATEGORIZED = "Uncategorized";
 
 let transactions = assignKeys(load("cc.transactions", []));
@@ -21,22 +18,6 @@ let assignments = load("cc.assignments", {});   // type -> category
 let excludedTx = new Set(load("cc.excludedTx", []));
 const saveExcludedTx = () => save("cc.excludedTx", [...excludedTx]);
 
-// Bring a stored setup up to date with the built-in list: apply renames, add
-// any built-in category that is missing, and keep EXCLUDED last so the others
-// hold on to their chart colours.
-(function migrateCategories() {
-  categories = categories.map((c) => RENAMED_CATEGORIES[c] || c);
-  for (const [type, cat] of Object.entries(assignments)) {
-    if (RENAMED_CATEGORIES[cat]) assignments[type] = RENAMED_CATEGORIES[cat];
-  }
-  for (const cat of DEFAULT_CATEGORIES) {
-    if (!categories.includes(cat)) categories.push(cat);
-  }
-  categories = [...new Set(categories)].filter((c) => c !== EXCLUDED);
-  categories.push(EXCLUDED);
-  save("cc.categories", categories);
-  save("cc.assignments", assignments);
-})();
 
 function load(key, fallback) {
   try {
@@ -405,7 +386,10 @@ function renderCategories() {
     const select = document.createElement("select");
     const addOption = (label, value) => {
       const option = new Option(label, value);
-      if (value) option.style.background = categoryColor(value);
+      if (value) {
+        option.style.background = categoryColor(value);
+        option.style.color = textOn(categoryColor(value));
+      }
       select.add(option);
     };
     addOption("—", "");
@@ -417,7 +401,9 @@ function renderCategories() {
     // The closed picker carries the colour of whatever is selected, so the
     // column can be read as a block without opening anything.
     const paint = () => {
-      select.style.background = select.value ? categoryColor(select.value) : "";
+      const swatch = select.value ? categoryColor(select.value) : "";
+      select.style.background = swatch;
+      select.style.color = swatch ? textOn(swatch) : "";
     };
     paint();
     select.onchange = () => {
@@ -471,16 +457,42 @@ function selectedGroupBy() {
   return document.querySelector('input[name="groupby"]:checked').value;
 }
 
-// Distinct hues, so neighbouring stack layers stay tellable apart.
-const color = (i) => `hsl(${(i * 137.5) % 360}, 65%, 55%)`;
+// A fixed, validated categorical palette rather than generated hues: the order
+// is what keeps neighbouring stack layers apart for colourblind readers, so
+// slots are handed out in order and never cycled. Colour follows the category
+// itself, not its position in the chart, so filtering never repaints anything.
+const SERIES_COLORS = [
+  "#2a78d6",  // blue
+  "#eb6834",  // orange
+  "#1baf7a",  // aqua
+  "#eda100",  // yellow
+  "#e87ba4",  // magenta
+  "#008300",  // green
+  "#4a3aa7",  // violet
+  "#e34948",  // red
+];
+const OVERFLOW_COLOR = "#8a8983";   // past the palette; see categoryColor
+const UNCATEGORIZED_COLOR = "#b8b7b2";
+const EXCLUDED_COLOR = "#e0dfda";
 
 // Single source of truth for category colours, shared by the chart and the
 // category pickers. The two that never carry a hue are the ones that are not
 // really categories: one is not charted, the other is the absence of a choice.
 function categoryColor(category) {
-  if (category === EXCLUDED) return "#ddd";
-  if (category === UNCATEGORIZED) return "#bbb";
-  return color(categories.indexOf(category));
+  if (category === EXCLUDED) return EXCLUDED_COLOR;
+  if (category === UNCATEGORIZED) return UNCATEGORIZED_COLOR;
+  // Excluded is skipped so it does not consume a hue slot.
+  const i = categories.filter((c) => c !== EXCLUDED).indexOf(category);
+  return i >= 0 && i < SERIES_COLORS.length ? SERIES_COLORS[i] : OVERFLOW_COLOR;
+}
+
+// Black or white, whichever contrasts more with the swatch behind it.
+function textOn(hex) {
+  const channels = [1, 3, 5]
+    .map((i) => parseInt(hex.slice(i, i + 2), 16) / 255)
+    .map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+  const luminance = 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
+  return (luminance + 0.05) / 0.05 > 1.05 / (luminance + 0.05) ? "#000" : "#fff";
 }
 
 function renderChart() {
@@ -525,6 +537,11 @@ function renderChart() {
     label: category,
     data: labels.map((b) => totals.get(b).get(category) || 0),
     backgroundColor: categoryColor(category),
+    // A hairline of surface between stacked segments so touching fills stay
+    // separable; only on top, so narrow bars keep their width.
+    borderColor: "#fff",
+    borderWidth: { top: 2 },
+    borderSkipped: false,
   }));
 
   if (chart) chart.destroy();

@@ -242,8 +242,8 @@ const RANGES = [
   { id: "2y", label: "Last 2 years", start: () => backTo(2, 0) },
   { id: "1y", label: "Last 1 year", start: () => backTo(1, 0) },
   { id: "ytd", label: "Year to date", start: () => isoDate(new Date(new Date().getFullYear(), 0, 1)) },
-  { id: "3m", label: "Last 3 months", start: () => backTo(0, 3) },
   { id: "6m", label: "Last 6 months", start: () => backTo(0, 6) },
+  { id: "3m", label: "Last 3 months", start: () => backTo(0, 3) },
   { id: "1m", label: "Last month", start: () => backTo(0, 1) },
   { id: "custom", label: "Custom…", start: () => null },
 ];
@@ -343,14 +343,34 @@ rangeEl.onchange = () => {
   renderAll();
 };
 
-// A date input hands back either "" or a valid ISO date, so nothing else needs
-// checking here; typed nonsense simply never becomes a value.
-fromEl.onchange = toEl.onchange = () => {
-  savedCustom = { from: fromEl.value || null, to: toEl.value || null };
+// Free text now (see index.html for why), so unlike a native date input this
+// can hold anything typed; isoOrNull is what turns garbage into an open bound,
+// and syncRangeControls snaps the field back to whatever that resolved to.
+function onCustomBoundChange() {
+  savedCustom = { from: isoOrNull(fromEl.value), to: isoOrNull(toEl.value) };
   save("cc.customRange", savedCustom);
   writeUrl({ range: CUSTOM, from: savedCustom.from, to: savedCustom.to });
+  syncRangeControls();
   renderAll();
-};
+}
+fromEl.onchange = toEl.onchange = onCustomBoundChange;
+
+// The 📅 button is the only use for these: a real date input, kept off-screen,
+// opened on demand so picking a date does not require a browser whose date
+// picker happens to render YYYY-MM-DD.
+function wirePicker(textEl, nativeEl, buttonId) {
+  document.getElementById(buttonId).onclick = () => {
+    nativeEl.value = isoOrNull(textEl.value) || "";
+    if (nativeEl.showPicker) nativeEl.showPicker();
+    else nativeEl.focus();   // older browsers: focus at least reveals a picker
+  };
+  nativeEl.onchange = () => {
+    textEl.value = nativeEl.value;
+    onCustomBoundChange();
+  };
+}
+wirePicker(fromEl, document.getElementById("range-from-native"), "range-from-pick");
+wirePicker(toEl, document.getElementById("range-to-native"), "range-to-pick");
 
 /* ---------- tabs ---------- */
 

@@ -50,6 +50,12 @@
   #status { color: #555; margin-left: 1em; }
   .hint { color: #555; }
   fieldset { display: inline-block; margin: 0 0 1em 0; }
+
+  #range-from, #range-to { font-variant-numeric: tabular-nums; }
+  #custom-range button { border: 1px solid #999; background: #eee; cursor: pointer;
+                          padding: 1px 5px; vertical-align: middle; }
+  /* Kept in layout (not display:none) so showPicker() can still open it. */
+  .native-picker { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 </style>
 </head>
 <body>
@@ -59,10 +65,20 @@
 <button id="drop-btn" hidden>Drop transactions from localstorage</button>
 <span id="status"></span>
 <select id="range" hidden></select>
+<!-- A plain text field, not <input type="date">, so the format on screen is
+     always YYYY-MM-DD: the native picker's typed format follows the browser's
+     language setting, not anything the page can ask for. The 📅 button opens
+     a real date input (kept off-screen) for picking one instead of typing. -->
 <span id="custom-range" hidden>
-  <input type="date" id="range-from" title="From, YYYY-MM-DD (empty: no lower bound)">
+  <input type="text" id="range-from" size="10" placeholder="YYYY-MM-DD"
+         pattern="\d{4}-\d{2}-\d{2}" title="From, YYYY-MM-DD (empty: no lower bound)">
+  <button type="button" id="range-from-pick" title="Pick a date">&#128197;</button>
+  <input type="date" id="range-from-native" class="native-picker" tabindex="-1" aria-hidden="true">
   &ndash;
-  <input type="date" id="range-to" title="To, YYYY-MM-DD (empty: no upper bound)">
+  <input type="text" id="range-to" size="10" placeholder="YYYY-MM-DD"
+         pattern="\d{4}-\d{2}-\d{2}" title="To, YYYY-MM-DD (empty: no upper bound)">
+  <button type="button" id="range-to-pick" title="Pick a date">&#128197;</button>
+  <input type="date" id="range-to-native" class="native-picker" tabindex="-1" aria-hidden="true">
 </span>
 
 <div id="tabs">

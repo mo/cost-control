@@ -860,6 +860,17 @@ function renderChart() {
       .map(([type, cost]) => `    ${type}: ${kronorExact(cost)}`);
   };
 
+  // What the whole bar comes to, whichever layer of it is under the pointer.
+  // Summed from the datasets rather than from `totals` so that it always
+  // matches the bar as drawn, legend-hidden categories left out and all.
+  const groupTotal = (items) => {
+    const ci = items[0].chart;
+    const index = items[0].dataIndex;
+    const sum = ci.data.datasets.reduce(
+      (total, ds, i) => total + (ci.isDatasetVisible(i) ? ds.data[index] : 0), 0);
+    return `Total this ${BUCKET_NOUN[groupBy]}: ${kronorExact(sum)}`;
+  };
+
   if (chart) chart.destroy();
   chart = new Chart(canvas, {
     type: "bar",
@@ -879,6 +890,7 @@ function renderChart() {
           callbacks: {
             label: (c) => `${c.dataset.label}: ${kronorExact(c.parsed.y)}`,
             afterLabel: typeLines,
+            footer: groupTotal,
           },
         },
         // Clicking a legend entry hides that category's bars (Chart.js default

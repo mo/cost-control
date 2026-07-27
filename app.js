@@ -3,15 +3,29 @@
 // Types put in EXCLUDED are left out of the chart, which is how transfers
 // between own accounts are kept from swamping the actual costs.
 const EXCLUDED = "Excluded";
-const DEFAULT_CATEGORIES = [
+const BUILTIN_CATEGORIES = [
   "Rent", "Food", "Food (takeout)", "Clothes", "Car (gas)", "Car (repair)",
-  "Entertainment", "Utilities", "Medicine", EXCLUDED,
+  "Entertainment", "Utilities", "Medicine",
 ];
 const UNCATEGORIZED = "Uncategorized";
 
 let transactions = assignKeys(load("cc.transactions", []));
-let categories = load("cc.categories", DEFAULT_CATEGORIES);
 let assignments = load("cc.assignments", {});   // type -> category
+
+// Only the user's own categories are stored. The built-in ones come from the
+// code every time, so adding one here shows up without anything having to
+// rewrite what is already in localStorage.
+let customCategories = load("cc.customCategories", []);
+let categories = [];
+
+function rebuildCategories() {
+  categories = [
+    ...BUILTIN_CATEGORIES,
+    ...customCategories.filter((c) => !BUILTIN_CATEGORIES.includes(c) && c !== EXCLUDED),
+    EXCLUDED,
+  ];
+}
+rebuildCategories();
 
 // Individually excluded transactions, by row key. Deliberately kept when the
 // transactions themselves are dropped, so reloading a statement does not lose
@@ -423,8 +437,9 @@ document.getElementById("add-category").onclick = () => {
   const input = document.getElementById("new-category");
   const name = input.value.trim();
   if (name && !categories.includes(name)) {
-    categories.push(name);
-    save("cc.categories", categories);
+    customCategories.push(name);
+    save("cc.customCategories", customCategories);
+    rebuildCategories();
     renderCategories();
   }
   input.value = "";

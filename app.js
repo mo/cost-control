@@ -258,12 +258,38 @@ function visible() {
   return start === null ? transactions : transactions.filter((t) => t.date >= start);
 }
 
+/* ---------- URL state ---------- */
+
+// Which tab is open and what the chart is showing live in the query string, so
+// they survive a reload and the address bar doubles as a link to that exact
+// view. Only the tabs push a history entry: stepping back through every legend
+// click would bury the navigation worth going back to. The date range is not
+// here — it filters every tab, so it is saved with the other settings instead.
+function urlParams() {
+  return new URLSearchParams(location.search);
+}
+
+// A key with an array value becomes one parameter per entry, which keeps
+// category names with a comma in them from needing a separator of their own.
+function writeUrl(changes, push) {
+  const url = new URL(location);
+  for (const [key, value] of Object.entries(changes)) {
+    if (!Array.isArray(value)) {
+      url.searchParams.set(key, value);   // in place, so the order stays put
+      continue;
+    }
+    url.searchParams.delete(key);
+    for (const one of value) url.searchParams.append(key, one);
+  }
+  history[push ? "pushState" : "replaceState"]({}, "", url);
+}
+
 /* ---------- tabs ---------- */
 
 const PAGES = ["data", "categories", "chart"];
 
 function currentPage() {
-  const page = new URLSearchParams(location.search).get("page");
+  const page = urlParams().get("page");
   return PAGES.includes(page) ? page : "data";
 }
 
@@ -274,11 +300,7 @@ function showPage(page, push) {
   for (const btn of document.querySelectorAll("#tabs button")) {
     btn.classList.toggle("active", btn.dataset.page === page);
   }
-  if (push) {
-    const url = new URL(location);
-    url.searchParams.set("page", page);
-    history.pushState({}, "", url);
-  }
+  if (push) writeUrl({ page }, true);
   // Both tabs are rendered on show: the canvas needs to be visible to size
   // itself, and the data tab's "Excluded category?" column goes stale as soon
   // as an assignment changes on the categories tab.
@@ -289,7 +311,13 @@ function showPage(page, push) {
 for (const btn of document.querySelectorAll("#tabs button")) {
   btn.onclick = () => showPage(btn.dataset.page, true);
 }
-window.onpopstate = () => showPage(currentPage(), false);
+
+// Going back or forward re-reads everything from the URL, chart controls
+// included, since the entry stepped onto may have been left on another tab.
+window.onpopstate = () => {
+  syncGroupByRadio();
+  showPage(currentPage(), false);
+};
 
 /* ---------- Data tab ---------- */
 
@@ -541,8 +569,24 @@ function chartStart(groupBy) {
   return isoDate(next) > isoDate(new Date()) ? start : isoDate(next);
 }
 
+const GROUP_BYS = ["year", "quarter", "month", "week"];
+const DEFAULT_GROUP_BY = "quarter";
+
+// The URL is what the chart reads, and the radios are just its view of it —
+// that way a reload, a shared link and a click on a radio all go through the
+// same path. Same for the categories hidden by clicking the legend; names that
+// no longer exist simply never match anything.
 function selectedGroupBy() {
-  return document.querySelector('input[name="groupby"]:checked').value;
+  const group = urlParams().get("group");
+  return GROUP_BYS.includes(group) ? group : DEFAULT_GROUP_BY;
+}
+
+function hiddenCategories() {
+  return new Set(urlParams().getAll("hide"));
+}
+
+function syncGroupByRadio() {
+  document.querySelector(`input[name="groupby"][value="${selectedGroupBy()}"]`).checked = true;
 }
 
 const BUCKET_NOUN = { year: "year", quarter: "quarter", month: "month", week: "week" };
@@ -684,10 +728,12 @@ function renderChart() {
 
   // Colour by position in `categories` so a category keeps its colour even as
   // other categories appear and disappear from the stack.
+  const hidden = hiddenCategories();
   const datasets = stackOrder.map((category) => ({
     label: category,
     data: labels.map((b) => totals.get(b).get(category) || 0),
     backgroundColor: categoryColor(category),
+    hidden: hidden.has(category),
     // A hairline of surface between stacked segments so touching fills stay
     // separable; only on top, so narrow bars keep their width.
     borderColor: "#fff",
@@ -695,7 +741,7 @@ function renderChart() {
     borderSkipped: false,
   }));
 
-  renderChartSummary(stackOrder, totals, labels, groupBy);
+  renderChartSummary(stackOrder.filter((c) => !hidden.has(c)), totals, labels, groupBy);
 
   if (chart) chart.destroy();
   chart = new Chart(canvas, {
@@ -717,20 +763,24 @@ function renderChart() {
         },
         // Clicking a legend entry hides that category's bars (Chart.js default
         // behaviour); mirror the same hide/show onto the summary table below so
-        // its rows and total only ever reflect what the chart is showing.
+        // its rows and total only ever reflect what the chart is showing, and
+        // into the URL so the same categories stay hidden across a reload.
         legend: {
           onClick: (evt, legendItem, legend) => {
             const ci = legend.chart;
             const index = legendItem.datasetIndex;
+            const hidden = hiddenCategories();
             if (ci.isDatasetVisible(index)) {
               ci.hide(index);
               legendItem.hidden = true;
+              hidden.add(stackOrder[index]);
             } else {
               ci.show(index);
               legendItem.hidden = false;
+              hidden.delete(stackOrder[index]);
             }
-            const shown = stackOrder.filter((_, i) => ci.isDatasetVisible(i));
-            renderChartSummary(shown, totals, labels, groupBy);
+            writeUrl({ hide: [...hidden] });
+            renderChartSummary(stackOrder.filter((c) => !hidden.has(c)), totals, labels, groupBy);
           },
         },
       },
@@ -739,7 +789,10 @@ function renderChart() {
 }
 
 for (const radio of document.querySelectorAll('input[name="groupby"]')) {
-  radio.onchange = renderChart;
+  radio.onchange = () => {
+    writeUrl({ group: radio.value });
+    renderChart();
+  };
 }
 
 /* ---------- startup ---------- */
@@ -754,4 +807,5 @@ function renderAll() {
 setStatus(transactions.length ? `${transactions.length} transactions loaded` : "");
 renderData();
 renderCategories();
+syncGroupByRadio();
 showPage(currentPage(), false);   // renders the chart if that is the active tab

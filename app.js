@@ -507,30 +507,44 @@ function selectedGroupBy() {
 
 const BUCKET_NOUN = { year: "year", quarter: "quarter", month: "month", week: "week" };
 
+let summarySort = { key: "total", dir: "desc" };
+// Categories to show, totals and labels to compute from, and the current
+// group-by — cached so a re-sort (or a legend click hiding a category) can
+// redraw the table without recomputing it from the transactions again.
+let chartSummaryState = null;
+
 // Per-category totals under the chart, with the average over the buckets the
 // chart is actually showing — so it tracks both the group-by and the date range.
 function renderChartSummary(stackOrder, totals, labels, groupBy) {
+  chartSummaryState = { stackOrder, totals, labels, groupBy };
+  drawChartSummary();
+}
+
+function drawChartSummary() {
+  const { stackOrder, totals, labels, groupBy } = chartSummaryState;
   const table = document.getElementById("chart-summary");
   table.hidden = false;
   document.getElementById("summary-average").textContent =
     `Average cost per ${BUCKET_NOUN[groupBy]}`;
 
+  const rows = stackOrder.map((category) => {
+    const total = labels.reduce((sum, b) => sum + (totals.get(b).get(category) || 0), 0);
+    return { category, total, average: total / labels.length };
+  });
+  const grandTotal = rows.reduce((sum, r) => sum + r.total, 0);
+
+  markSortIndicators(table, summarySort);
   const tbody = table.querySelector("tbody");
   tbody.innerHTML = "";
-  let grandTotal = 0;
-
-  for (const category of stackOrder) {
-    const total = labels.reduce((sum, b) => sum + (totals.get(b).get(category) || 0), 0);
-    grandTotal += total;
-
+  for (const row of sortRows(rows, summarySort)) {
     const tr = tbody.insertRow();
     const name = tr.insertCell();
     const swatch = document.createElement("span");
     swatch.className = "swatch";
-    swatch.style.background = categoryColor(category);
-    name.append(swatch, category);
-    addAmount(tr, total);
-    addAmount(tr, total / labels.length);
+    swatch.style.background = categoryColor(row.category);
+    name.append(swatch, row.category);
+    addAmount(tr, row.total);
+    addAmount(tr, row.average);
   }
 
   const foot = table.querySelector("tfoot") || table.createTFoot();
@@ -540,6 +554,8 @@ function renderChartSummary(stackOrder, totals, labels, groupBy) {
   addAmount(tr, grandTotal);
   addAmount(tr, grandTotal / labels.length);
 }
+
+bindSorting(document.getElementById("chart-summary"), summarySort, drawChartSummary);
 
 function addAmount(tr, value) {
   const cell = tr.insertCell();
@@ -657,6 +673,24 @@ function renderChart() {
       plugins: {
         tooltip: {
           callbacks: { label: (c) => `${c.dataset.label}: ${kronorExact(c.parsed.y)}` },
+        },
+        // Clicking a legend entry hides that category's bars (Chart.js default
+        // behaviour); mirror the same hide/show onto the summary table below so
+        // its rows and total only ever reflect what the chart is showing.
+        legend: {
+          onClick: (evt, legendItem, legend) => {
+            const ci = legend.chart;
+            const index = legendItem.datasetIndex;
+            if (ci.isDatasetVisible(index)) {
+              ci.hide(index);
+              legendItem.hidden = true;
+            } else {
+              ci.show(index);
+              legendItem.hidden = false;
+            }
+            const shown = stackOrder.filter((_, i) => ci.isDatasetVisible(i));
+            renderChartSummary(shown, totals, labels, groupBy);
+          },
         },
       },
     },

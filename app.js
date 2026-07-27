@@ -10,7 +10,8 @@ let transactions = load("cc.transactions", []);
 let categories = load("cc.categories", DEFAULT_CATEGORIES);
 let assignments = load("cc.assignments", {});   // type -> category
 
-// Kept last so it stays out of the way of the categories worth reading.
+// Appended rather than inserted so existing categories keep their chart colour;
+// the dropdown lists it first regardless.
 if (!categories.includes(EXCLUDED)) categories.push(EXCLUDED);
 
 function load(key, fallback) {
@@ -250,7 +251,11 @@ function markSortIndicators(table, sort) {
   }
 }
 
-const kronor = (n) => n.toLocaleString("sv-SE", { maximumFractionDigits: 2 });
+// Amounts are shown rounded to whole kronor to keep the columns scannable; the
+// exact figure, always with two decimals, is available on hover.
+const kronor = (n) => n.toLocaleString("sv-SE", { maximumFractionDigits: 0 });
+const kronorExact = (n) =>
+  n.toLocaleString("sv-SE", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " kr";
 
 // An empty tab means either "nothing loaded" or "nothing in the chosen range".
 function setEmptyMessage(el, loadHint) {
@@ -284,6 +289,7 @@ function renderData() {
     tr.insertCell().textContent = t.description;
     const amount = tr.insertCell();
     amount.textContent = kronor(t.amount);
+    amount.title = kronorExact(t.amount);
     amount.className = "amount" + (t.amount < 0 ? " negative" : "");
     tr.insertCell().textContent = t.excluded;
   }
@@ -333,11 +339,17 @@ function renderCategories() {
     count.className = "amount";
     const total = tr.insertCell();
     total.textContent = kronor(row.total);
+    total.title = kronorExact(row.total);
     total.className = "amount";
 
+    // Excluded sits right after the blank option: it is the one picked most
+    // often when working down the list of uncategorized types.
     const select = document.createElement("select");
     select.add(new Option("—", ""));
-    for (const cat of categories) select.add(new Option(cat, cat));
+    select.add(new Option(EXCLUDED, EXCLUDED));
+    for (const cat of categories) {
+      if (cat !== EXCLUDED) select.add(new Option(cat, cat));
+    }
     select.value = assignments[row.type] || "";
     select.onchange = () => {
       if (select.value) assignments[row.type] = select.value;
@@ -443,11 +455,15 @@ function renderChart() {
       maintainAspectRatio: false,
       scales: {
         x: { stacked: true },
-        y: { stacked: true, title: { display: true, text: "kronor" } },
+        y: {
+          stacked: true,
+          title: { display: true, text: "kronor" },
+          ticks: { callback: (v) => kronor(v) },
+        },
       },
       plugins: {
         tooltip: {
-          callbacks: { label: (c) => `${c.dataset.label}: ${kronor(c.parsed.y)} kr` },
+          callbacks: { label: (c) => `${c.dataset.label}: ${kronorExact(c.parsed.y)}` },
         },
       },
     },

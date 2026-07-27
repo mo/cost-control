@@ -780,6 +780,17 @@ function textOn(hex) {
   return (luminance + 0.05) / 0.05 > 1.05 / (luminance + 0.05) ? "#000" : "#fff";
 }
 
+// The chart totals are keyed bucket -> category, and the tooltip needs one
+// level deeper, so both are filled through the same pair of one-liners.
+function nested(map, key) {
+  if (!map.has(key)) map.set(key, new Map());
+  return map.get(key);
+}
+
+function addTo(map, key, amount) {
+  map.set(key, (map.get(key) || 0) + amount);
+}
+
 function renderChart() {
   const empty = document.getElementById("chart-empty");
   const canvas = document.getElementById("chart");
@@ -789,6 +800,7 @@ function renderChart() {
   const rows = transactions.filter((t) =>
     (start === null || t.date >= start) && (end === null || t.date <= end));
   const totals = new Map();       // bucket -> category -> cost
+  const byType = new Map();       // bucket -> category -> type -> cost
   const usedCategories = new Set();
 
   for (const t of rows) {
@@ -797,9 +809,8 @@ function renderChart() {
     const category = assignments[t.type] || UNCATEGORIZED;
     if (category === EXCLUDED) continue;
     const bucket = bucketOf(t.date, groupBy);
-    if (!totals.has(bucket)) totals.set(bucket, new Map());
-    const row = totals.get(bucket);
-    row.set(category, (row.get(category) || 0) + -t.amount);
+    addTo(nested(totals, bucket), category, -t.amount);
+    addTo(nested(nested(byType, bucket), category), t.type, -t.amount);
     usedCategories.add(category);
   }
 
@@ -837,6 +848,18 @@ function renderChart() {
 
   renderChartSummary(stackOrder.filter((c) => !hidden.has(c)), totals, labels, groupBy);
 
+  // Under the segment's own total, what it is actually made of: every type in
+  // that category and bucket, dearest first, so a bar that stands out explains
+  // itself without a trip to the Categories tab.
+  const typeLines = (context) => {
+    const perCategory = byType.get(context.label);
+    const perType = perCategory && perCategory.get(context.dataset.label);
+    if (!perType) return [];
+    return [...perType]
+      .sort((a, b) => b[1] - a[1])
+      .map(([type, cost]) => `    ${type}: ${kronorExact(cost)}`);
+  };
+
   if (chart) chart.destroy();
   chart = new Chart(canvas, {
     type: "bar",
@@ -853,7 +876,10 @@ function renderChart() {
       },
       plugins: {
         tooltip: {
-          callbacks: { label: (c) => `${c.dataset.label}: ${kronorExact(c.parsed.y)}` },
+          callbacks: {
+            label: (c) => `${c.dataset.label}: ${kronorExact(c.parsed.y)}`,
+            afterLabel: typeLines,
+          },
         },
         // Clicking a legend entry hides that category's bars (Chart.js default
         // behaviour); mirror the same hide/show onto the summary table below so

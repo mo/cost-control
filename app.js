@@ -5,7 +5,7 @@
 const EXCLUDED = "Excluded";
 const BUILTIN_CATEGORIES = [
   "Rent", "Food", "Food (takeout)", "Clothes", "Car (gas)", "Car (repair)",
-  "Entertainment", "Utilities", "Medicine",
+  "Entertainment", "Utilities", "Medicine", "Car (other)",
 ];
 const UNCATEGORIZED = "Uncategorized";
 
@@ -72,7 +72,15 @@ const BANK_PARSERS = [
 // "MAXI ICA STO/26-07-13" -> "MAXI ICA STO", but "APPLE COM/BI" keeps its slash
 // because it is not followed by a date.
 function inferTypeSwedbank(description) {
-  return description.replace(/\/\d{2}-\d{2}-\d{2}\s*$/, "").trim();
+  const withoutDate = description.replace(/\/\d{2}-\d{2}-\d{2}\s*$/, "").trim();
+
+  // Swedbank's Spotify line carries something that changes every charge — a
+  // per-charge reference code ("SPOTIFY P446") in recent statements, no space
+  // before the merchant ID ("SPOTIFYSE") in older ones — so left alone every
+  // payment becomes its own type instead of one "SPOTIFY" to categorize once.
+  if (/^SPOTIFY/i.test(withoutDate)) return "SPOTIFY";
+
+  return withoutDate;
 }
 
 function parseAmount(raw) {
@@ -530,6 +538,7 @@ const SERIES_COLORS = [
   "#4a3aa7",  // violet
   "#e34948",  // red
   "#7a5cc4",  // light violet
+  "#8a2a5c",  // plum
 ];
 const OVERFLOW_COLOR = "#8a8983";   // past the palette; see categoryColor
 const UNCATEGORIZED_COLOR = "#b8b7b2";

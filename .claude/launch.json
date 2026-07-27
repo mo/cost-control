@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "cost-control",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "--bind", "127.0.0.1", "8912"],
+      "port": 8912
+    }
+  ]
+}

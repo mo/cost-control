@@ -2,9 +2,92 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Cost Control</title>
+<style>
+  body { font-family: sans-serif; font-size: 14px; margin: 1em; }
+  button, select, input { font-size: 14px; }
+
+  #tabs { margin: 1em 0 0.5em 0; border-bottom: 1px solid #999; }
+  #tabs button { border: 1px solid #999; border-bottom: none; background: #eee;
+                 padding: 0.4em 1em; margin-right: 2px; cursor: pointer; }
+  #tabs button.active { background: #fff; font-weight: bold; position: relative; top: 1px; }
+
+  .page { display: none; }
+  .page.active { display: block; }
+
+  table { border-collapse: collapse; }
+  th, td { border: 1px solid #ccc; padding: 2px 6px; text-align: left; }
+  th { background: #eee; }
+  th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+  td.amount, th.amount { text-align: right; font-variant-numeric: tabular-nums; }
+  .negative { color: #b00; }
+
+  #status { color: #555; margin-left: 1em; }
+  .hint { color: #555; }
+  fieldset { display: inline-block; margin: 0 0 1em 0; }
+</style>
 </head>
 <body>
-<h1>Hello, world!</h1>
+
+<button id="load-btn">Load transactions</button>
+<input type="file" id="file-input" accept=".csv" hidden>
+<button id="drop-btn" hidden>Drop transactions from localstorage</button>
+<span id="status"></span>
+
+<div id="tabs">
+  <button data-page="data">Data</button>
+  <button data-page="categories">Categories</button>
+  <button data-page="chart">Chart</button>
+</div>
+
+<div id="page-data" class="page">
+  <p id="data-empty" class="hint">No transactions loaded. Click "Load transactions" to pick a .csv file.</p>
+  <table id="data-table" hidden>
+    <thead>
+      <tr>
+        <th class="sortable" data-sort="date">Date</th>
+        <th class="sortable" data-sort="type">Type</th>
+        <th class="sortable" data-sort="description">Description</th>
+        <th class="sortable amount" data-sort="amount">Amount</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+</div>
+
+<div id="page-categories" class="page">
+  <p>
+    <input id="new-category" placeholder="New category name" size="20">
+    <button id="add-category">Add category</button>
+  </p>
+  <p id="cat-empty" class="hint">No transactions loaded, so there are no types to categorize yet.</p>
+  <table id="types-table" hidden>
+    <thead>
+      <tr>
+        <th class="sortable" data-sort="type">Type</th>
+        <th class="sortable amount" data-sort="count">Count</th>
+        <th class="sortable amount" data-sort="total">Total cost</th>
+        <th>Category</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+</div>
+
+<div id="page-chart" class="page">
+  <fieldset>
+    <legend>Group by</legend>
+    <label><input type="radio" name="groupby" value="year"> Per year</label>
+    <label><input type="radio" name="groupby" value="quarter" checked> Per quarter</label>
+    <label><input type="radio" name="groupby" value="month"> Per month</label>
+    <label><input type="radio" name="groupby" value="week"> Per week</label>
+  </fieldset>
+  <p id="chart-empty" class="hint">No transactions loaded.</p>
+  <div style="height: 70vh;"><canvas id="chart"></canvas></div>
+</div>
+
+<script src="https://unpkg.com/chart.js@4.4.1/dist/chart.umd.js"></script>
+<script src="app.js"></script>
 </body>
 </html>

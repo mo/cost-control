@@ -49,6 +49,12 @@ function save(key, value) {
   localStorage.setItem(key, JSON.stringify(value));
 }
 
+// `type` and `key` are derived on load, so they are stripped rather than
+// persisted — only what the CSV actually said is kept.
+function saveTransactions() {
+  save("cc.transactions", transactions.map(({ type, key, ...rest }) => rest));
+}
+
 /* ---------- CSV parsing ---------- */
 
 // Each bank gets its own parser: `matches` inspects the header row, `parse`
@@ -110,9 +116,16 @@ function parseCsv(text) {
 
   const rows = lines.slice(1)
     .map((line) => parser.parse(splitCsvLine(line), header))
-    .filter((t) => t.date);
+    .filter((t) => t.date && isExpense(t));
   return { bank: parser.name, rows: assignDerived(rows, parser.name) };
 }
+
+// Money coming in is dropped the moment a statement is parsed: this tracks
+// costs, so income is of no use here, and discarding it up front keeps a salary
+// out of the Data tab and out of localStorage instead of relying on every
+// reader to filter it out again. Zero-amount rows go the same way — they are
+// not costs either.
+const isExpense = (t) => t.amount < 0;
 
 // `type` and `key` are both worked out from what the CSV said, so they are
 // derived on every load rather than stored: changing how a type is inferred
@@ -141,7 +154,11 @@ function assignKeys(list) {
 }
 
 bank = load("cc.bank", BANK_PARSERS[0].name);
-transactions = assignDerived(load("cc.transactions", []), bank);
+const stored = load("cc.transactions", []);
+transactions = assignDerived(stored.filter(isExpense), bank);
+// A statement imported before the income was being discarded has left some of
+// it sitting in localStorage; rewriting the list clears it out for good.
+if (transactions.length !== stored.length) saveTransactions();
 
 /* ---------- loading ---------- */
 
@@ -187,9 +204,7 @@ document.getElementById("file-input").onchange = (e) => {
       transactions = parsed.rows;
       bank = parsed.bank;
       save("cc.bank", bank);
-      // `type` and `key` are derived on load, so they are stripped rather than
-      // persisted — only what the CSV actually said is kept.
-      save("cc.transactions", transactions.map(({ type, key, ...rest }) => rest));
+      saveTransactions();
       setStatus(`${transactions.length} transactions from ${file.name}`);
       renderAll();
     } catch (err) {
@@ -491,7 +506,7 @@ function renderData() {
     const amount = tr.insertCell();
     amount.textContent = kronor(t.amount);
     amount.title = kronorExact(t.amount);
-    amount.className = "amount" + (t.amount < 0 ? " negative" : "");
+    amount.className = "amount negative";
     tr.insertCell().textContent = t.excluded;
 
     const box = document.createElement("input");
@@ -523,7 +538,7 @@ function typeSummary() {
       byType.set(t.type, entry);
     }
     entry.count++;
-    if (t.amount < 0) entry.total += -t.amount;
+    entry.total += -t.amount;
   }
   return [...byType.values()];
 }
@@ -804,7 +819,6 @@ function renderChart() {
   const usedCategories = new Set();
 
   for (const t of rows) {
-    if (t.amount >= 0) continue;  // costs only
     if (excludedTx.has(t.key)) continue;
     const category = assignments[t.type] || UNCATEGORIZED;
     if (category === EXCLUDED) continue;
@@ -816,8 +830,8 @@ function renderChart() {
 
   const labels = [...totals.keys()].sort();
 
-  // Nothing chartable: no data at all, none in range, or everything left is
-  // income or excluded.
+  // Nothing chartable: no data at all, none in range, or everything left in
+  // range is excluded.
   empty.hidden = labels.length > 0;
   canvas.hidden = labels.length === 0;
   if (!labels.length) {
